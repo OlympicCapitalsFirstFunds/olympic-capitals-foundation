@@ -5,4 +5,112 @@ const token=document.querySelector("#token"),rows=document.querySelector("#rows"
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 document.querySelector("#load").onclick=async()=>{msg.textContent="Loading…";try{const r=await fetch("/api/admin/list",{headers:{Authorization:"Bearer "+token.value}}),d=await r.json();if(!r.ok)throw Error(d.error||"Unable to load");rows.innerHTML=d.applications.map(a=>`<tr><td><b>${esc(a.reference)}</b><br>${esc(a.full_name)}<br>${esc(a.email)}<br>${esc(a.phone)}<br>${esc(a.country)}</td><td>${esc(a.pillar)}<br>${esc(a.applicant_type)}</td><td><b>${esc(a.project_title)}</b><div class="detail">${esc(a.description)}</div></td><td><select id="s-${esc(a.reference)}">${["Submitted","Under review","Additional information required","Approved","Declined"].map(s=>`<option ${s===a.status?"selected":""}>${s}</option>`).join("")}</select><textarea id="m-${esc(a.reference)}" rows="2" placeholder="Optional message to applicant"></textarea><button class="btn navy" onclick="updateStatus('${esc(a.reference)}')">Save decision</button><small>${esc(a.updated_at)}</small></td></tr>`).join("")||'<tr><td colspan="4">No applications yet.</td></tr>';msg.textContent=`Loaded ${d.applications.length} applications.`}catch(e){msg.textContent=e.message}};
 window.updateStatus=async ref=>{const status=document.querySelector("#s-"+CSS.escape(ref)).value,message=document.querySelector("#m-"+CSS.escape(ref)).value;try{const r=await fetch("/api/admin/update",{method:"POST",headers:{"Authorization":"Bearer "+token.value,"Content-Type":"application/json"},body:JSON.stringify({reference:ref,status,message})}),d=await r.json();if(!r.ok)throw Error(d.error||"Update failed");msg.textContent=`${ref} updated to ${status}. Applicant email notification is sent when mail delivery is configured.`;document.querySelector("#load").click()}catch(e){msg.textContent=e.message}};
-</script></body></html>
+
+<script>
+const token = document.querySelector("#token");
+const rows = document.querySelector("#rows");
+const msg = document.querySelector("#msg");
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;",
+  '"': "&quot;", "'": "&#39;"
+}[c]));
+
+window.applicationReferences = {};
+
+document.querySelector("#load").onclick = async () => {
+  msg.textContent = "Loading applications...";
+
+  try {
+    const r = await fetch("/api/admin/list", {
+      headers: { Authorization: "Bearer " + token.value }
+    });
+
+    const d = await r.json();
+    if (!r.ok) throw Error(d.error || "Unable to load applications.");
+
+    window.applicationReferences = {};
+
+    rows.innerHTML = (d.applications || []).map(a => {
+      window.applicationReferences[a.id] = a.reference_number;
+
+      let details = {};
+      try {
+        details = JSON.parse(a.application_details || "{}");
+      } catch {}
+
+      return `
+        <tr>
+          <td>
+            <b>${esc(a.reference_number)}</b><br>
+            ${esc(a.full_name)}<br>
+            ${esc(a.email)}<br>
+            ${esc(a.phone)}<br>
+            ${esc(a.country)}
+          </td>
+          <td>
+            ${esc(details.pillar)}<br>
+            ${esc(details.applicantType)}
+          </td>
+          <td>
+            <b>${esc(details.projectTitle)}</b>
+            <div class="detail">${esc(details.description)}</div>
+            <b>Requested: USD ${esc(a.grant_amount)}</b>
+          </td>
+          <td>
+            <select id="s-${Number(a.id)}">
+              ${["Submitted","Under review","Additional information required","Approved","Declined"].map(s =>
+                `<option ${s === a.status ? "selected" : ""}>${s}</option>`
+              ).join("")}
+            </select>
+            <textarea id="m-${Number(a.id)}" rows="2"
+              placeholder="Optional message to applicant">${esc(a.admin_notes)}</textarea>
+            <button class="btn navy" onclick="updateStatus(${Number(a.id)})">
+              Save decision
+            </button>
+            <small>${esc(a.updated_at)}</small>
+          </td>
+        </tr>
+      `;
+    }).join("") || '<tr><td colspan="4">No applications yet.</td></tr>';
+
+    msg.textContent = `Loaded ${(d.applications || []).length} applications.`;
+
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+};
+
+window.updateStatus = async id => {
+  const reference = window.applicationReferences[id];
+  if (!reference) {
+    msg.textContent = "Application reference not found. Reload applications.";
+    return;
+  }
+
+  const status = document.querySelector("#s-" + id).value;
+  const note = document.querySelector("#m-" + id).value;
+
+  try {
+    const r = await fetch("/api/admin/update", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + token.value,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ reference, status, note })
+    });
+
+    const d = await r.json();
+    if (!r.ok) throw Error(d.error || "Update failed.");
+
+    msg.textContent = "Application status updated. Email sent: " +
+      (d.emailSent ? "Yes" : "No");
+
+    document.querySelector("#load").click();
+
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+};
+</script>
