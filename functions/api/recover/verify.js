@@ -21,6 +21,7 @@ async function hash(value) {
 
 function token(bytes = 8) {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
+
   return [...data]
     .map(b => b.toString(16).padStart(2, "0"))
     .join("");
@@ -69,7 +70,7 @@ export async function onRequestPost({ request, env }) {
 
   try {
     const application = await env.DB.prepare(`
-      SELECT full_name, email
+      SELECT full_name, email, tracking_code_hash
       FROM applications
       WHERE reference_number = ?
       AND LOWER(email) = ?
@@ -98,7 +99,8 @@ export async function onRequestPost({ request, env }) {
       Number(recovery.attempts) >= 5
     ) {
       await env.DB.prepare(`
-        DELETE FROM tracking_recovery WHERE id = ?
+        DELETE FROM tracking_recovery
+        WHERE id = ?
       `).bind(recovery.id).run();
 
       return json({
@@ -122,52 +124,83 @@ export async function onRequestPost({ request, env }) {
 
     const newTrackingCode = token();
     const newTrackingHash = await hash(newTrackingCode);
+    const oldTrackingHash = application.tracking_code_hash;
 
-    const mail = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.RESEND_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        from: env.MAIL_FROM,
-        to: application.email,
-        subject: "Your New Foundation Tracking Code",
-        html: `
-          <p>Dear ${escapeHtml(application.full_name)},</p>
-          <p>Your tracking code recovery was successful.</p>
-          <p>Your new private tracking code is:</p>
-          <h2>${newTrackingCode}</h2>
-          <p>Application reference: ${escapeHtml(reference)}</p>
-          <p>Please keep this code safe.</p>
-        `
-      })
-    });
-
-    if (!mail.ok) {
-      return json({
-        error: "Unable to send your new tracking code. Please try again."
-      }, 503);
-    }
-
+    // SAVE THE NEW TRACKING CODE BEFORE SENDING THE EMAIL
     const updated = await env.DB.prepare(`
       UPDATE applications
       SET tracking_code_hash = ?,
           updated_at = CURRENT_TIMESTAMP
       WHERE reference_number = ?
       AND LOWER(email) = ?
+      AND tracking_code_hash = ?
     `).bind(
       newTrackingHash,
       reference,
-      email
+      email,
+      oldTrackingHash
     ).run();
 
     if (!updated.meta || updated.meta.changes !== 1) {
       return json({
-        error: "Unable to update your tracking code. Please contact support."
+        error: "Unable to update your tracking code. Please start recovery again."
       }, 500);
     }
 
+    // SEND THE NEW TRACKING CODE
+    let mail;
+
+    try {
+      mail = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.RESEND_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          from: env.MAIL_FROM,
+          to: application.email,
+          subject: "Your New Foundation Tracking Code",
+          html: `
+            <p>Dear ${escapeHtml(application.full_name)},</p>
+            <p>Your tracking code recovery was successful.</p>
+            <p>Your new private tracking code is:</p>
+            <h2>${newTrackingCode}</h2>
+            <p>Application reference: ${escapeHtml(reference)}</p>
+            <p>Please keep this code safe.</p>
+          `
+        })
+      });
+    } catch {
+      mail = null;
+    }
+
+    // RESTORE THE PREVIOUS CODE IF EMAIL DELIVERY IS REJECTED
+    if (!mail || !mail.ok) {
+      const restored = await env.DB.prepare(`
+        UPDATE applications
+        SET tracking_code_hash = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE reference_number = ?
+        AND tracking_code_hash = ?
+      `).bind(
+        oldTrackingHash,
+        reference,
+        newTrackingHash
+      ).run();
+
+      if (!restored.meta || restored.meta.changes !== 1) {
+        return json({
+          error: "Email delivery failed and the previous tracking code could not be restored. Please contact support."
+        }, 500);
+      }
+
+      return json({
+        error: "Unable to send your new tracking code. Your previous tracking code has been restored. Please try again."
+      }, 503);
+    }
+
+    // REMOVE THE USED RECOVERY REQUEST
     await env.DB.prepare(`
       DELETE FROM tracking_recovery
       WHERE id = ?
