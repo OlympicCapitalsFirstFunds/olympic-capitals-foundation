@@ -73,28 +73,49 @@ export async function onRequestPost({ request, env }) {
 
     let emailSent = false;
 
-    if (env.RESEND_API_KEY && env.MAIL_FROM) {
-      const response = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.RESEND_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          from: env.MAIL_FROM,
-          to: application.email,
-          subject: "Update on your foundation application",
-          html: `
-            <p>Dear ${escapeHtml(application.full_name)},</p>
-            <p>Your application reference is <strong>${escapeHtml(reference)}</strong>.</p>
-            <p>Current status: <strong>${escapeHtml(status)}</strong></p>
-            ${note ? `<p>Message: ${escapeHtml(note)}</p>` : ""}
-            <p>Thank you.</p>
-          `
-        })
-      });
+    if (
+      env.EMAIL_SERVICE_URL &&
+      env.EMAIL_SERVICE_SECRET &&
+      application.email
+    ) {
+      try {
+        const emailStatus = {
+          "Submitted": "Submitted",
+          "Under review": "Under Review",
+          "Additional information required":
+            "Additional Information Required",
+          "Approved": "Approved",
+          "Declined": "Declined"
+        }[status];
 
-      emailSent = response.ok;
+        const response = await fetch(env.EMAIL_SERVICE_URL, {
+          method: "POST",
+          redirect: "follow",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            secret: env.EMAIL_SERVICE_SECRET,
+            email: application.email,
+            name: application.full_name,
+            reference: reference,
+            status: emailStatus
+          })
+        });
+
+        const responseText = await response.text();
+
+        if (response.ok) {
+          try {
+            const result = JSON.parse(responseText);
+            emailSent = result.success === true;
+          } catch {
+            emailSent = false;
+          }
+        }
+      } catch (emailError) {
+        console.error("Email notification failed:", emailError);
+      }
     }
 
     return json({
@@ -103,7 +124,10 @@ export async function onRequestPost({ request, env }) {
       emailSent
     });
 
-  } catch {
-    return json({ error: "Unable to update application status." }, 500);
+  } catch (error) {
+    console.error("Application update failed:", error);
+    return json({
+      error: "Unable to update application status."
+    }, 500);
   }
 }
