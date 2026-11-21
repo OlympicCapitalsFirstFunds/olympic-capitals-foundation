@@ -1,8 +1,9 @@
+
 document.addEventListener("DOMContentLoaded", () => {
   const form = document.getElementById("application-form");
   const feedback = document.getElementById("form-feedback");
 
-  if (!form) return;
+  if (!form || !feedback) return;
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -21,9 +22,11 @@ document.addEventListener("DOMContentLoaded", () => {
     data.consent = form.querySelector('[name="consent"]').checked;
 
     try {
-      const response = await fetch("/api/application", {
+      const response = await fetch("/api/applications", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify(data)
       });
 
@@ -36,13 +39,15 @@ document.addEventListener("DOMContentLoaded", () => {
       feedback.textContent =
         "Your application was received. Reference: " +
         result.reference +
-        ". Please keep your tracking code safe: " +
+        ". Tracking code: " +
         result.trackingCode;
 
       form.reset();
+
     } catch (error) {
-      feedback.textContent = error.message ||
-        "Unable to submit your application. Please try again.";
+      feedback.textContent =
+        error.message || "Unable to submit your application. Please try again.";
+
     } finally {
       button.disabled = false;
       button.textContent = originalText;
