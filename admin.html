@@ -1,10 +1,62 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Foundation — Application Administration</title><link rel="stylesheet" href="/styles.css"><style>
-body{background:#f5f7fa}.admin{padding:45px 0}.admin-card{background:#fff;padding:26px;border:1px solid #e5e9ef;margin:20px 0}.admin h1{font-family:"Playfair Display";color:#0b1d3a}.admin table{border-collapse:collapse;width:100%;font-size:12px}.admin th,.admin td{text-align:left;padding:11px;border-bottom:1px solid #e9edf2;vertical-align:top}.admin th{color:#8b6b2e}.admin input,.admin select,.admin textarea{max-width:100%}.table-wrap{overflow:auto}.detail{white-space:pre-wrap;max-width:320px}.muted{color:#7b8798;font-size:12px}
-</style></head><body><div class="topline"><div class="wrap topline-inner">PRIVATE FOUNDATION ADMINISTRATION</div></div><main class="wrap admin"><p class="eyebrow">SECURE WORKSPACE</p><h1>Grant application administration</h1><p class="muted">This page is intended for authorized foundation administrators only. Keep the admin token private.</p><section class="admin-card"><label>Administrator access token<input id="token" type="password" autocomplete="off" placeholder="Paste ADMIN_TOKEN"></label><button class="btn navy" id="load">Load applications</button><p id="msg" class="muted" role="status"></p></section><section class="admin-card"><h2>Applications</h2><div class="table-wrap"><table><thead><tr><th>Reference / Applicant</th><th>Programme</th><th>Application</th><th>Status / Update</th></tr></thead><tbody id="rows"><tr><td colspan="4">Authenticate to load applications.</td></tr></tbody></table></div></section></main><script>
-const token=document.querySelector("#token"),rows=document.querySelector("#rows"),msg=document.querySelector("#msg");
-const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-document.querySelector("#load").onclick=async()=>{msg.textContent="Loading…";try{const r=await fetch("/api/admin/list",{headers:{Authorization:"Bearer "+token.value}}),d=await r.json();if(!r.ok)throw Error(d.error||"Unable to load");rows.innerHTML=d.applications.map(a=>`<tr><td><b>${esc(a.reference)}</b><br>${esc(a.full_name)}<br>${esc(a.email)}<br>${esc(a.phone)}<br>${esc(a.country)}</td><td>${esc(a.pillar)}<br>${esc(a.applicant_type)}</td><td><b>${esc(a.project_title)}</b><div class="detail">${esc(a.description)}</div></td><td><select id="s-${esc(a.reference)}">${["Submitted","Under review","Additional information required","Approved","Declined"].map(s=>`<option ${s===a.status?"selected":""}>${s}</option>`).join("")}</select><textarea id="m-${esc(a.reference)}" rows="2" placeholder="Optional message to applicant"></textarea><button class="btn navy" onclick="updateStatus('${esc(a.reference)}')">Save decision</button><small>${esc(a.updated_at)}</small></td></tr>`).join("")||'<tr><td colspan="4">No applications yet.</td></tr>';msg.textContent=`Loaded ${d.applications.length} applications.`}catch(e){msg.textContent=e.message}};
-window.updateStatus=async ref=>{const status=document.querySelector("#s-"+CSS.escape(ref)).value,message=document.querySelector("#m-"+CSS.escape(ref)).value;try{const r=await fetch("/api/admin/update",{method:"POST",headers:{"Authorization":"Bearer "+token.value,"Content-Type":"application/json"},body:JSON.stringify({reference:ref,status,message})}),d=await r.json();if(!r.ok)throw Error(d.error||"Update failed");msg.textContent=`${ref} updated to ${status}. Applicant email notification is sent when mail delivery is configured.`;document.querySelector("#load").click()}catch(e){msg.textContent=e.message}};
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Foundation — Application Administration</title>
+<link rel="stylesheet" href="/styles.css">
+<style>
+body{background:#f5f7fa}
+.admin{padding:45px 0}
+.admin-card{background:#fff;padding:26px;border:1px solid #e5e9ef;margin:20px 0}
+.admin h1{font-family:"Playfair Display";color:#0b1d3a}
+.admin table{border-collapse:collapse;width:100%;font-size:12px}
+.admin th,.admin td{text-align:left;padding:11px;border-bottom:1px solid #e9edf2;vertical-align:top}
+.admin th{color:#8b6b2e}
+.admin input,.admin select,.admin textarea{max-width:100%}
+.table-wrap{overflow:auto}
+.detail{white-space:pre-wrap;max-width:320px}
+.muted{color:#7b8798;font-size:12px}
+</style>
+</head>
+<body>
+<div class="topline">
+<div class="wrap topline-inner">PRIVATE FOUNDATION ADMINISTRATION</div>
+</div>
+
+<main class="wrap admin">
+<p class="eyebrow">SECURE WORKSPACE</p>
+<h1>Grant application administration</h1>
+<p class="muted">This page is intended for authorized foundation administrators only. Keep the admin token private.</p>
+
+<section class="admin-card">
+<label>Administrator access token
+<input id="token" type="password" autocomplete="off" placeholder="Paste ADMIN_TOKEN">
+</label>
+<button class="btn navy" id="load" type="button">Load applications</button>
+<p id="msg" class="muted" role="status"></p>
+</section>
+
+<section class="admin-card">
+<h2>Applications</h2>
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>Reference / Applicant</th>
+<th>Programme</th>
+<th>Application</th>
+<th>Status / Update</th>
+</tr>
+</thead>
+<tbody id="rows">
+<tr><td colspan="4">Authenticate to load applications.</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+</main>
 
 <script>
 const token = document.querySelector("#token");
@@ -12,21 +64,28 @@ const rows = document.querySelector("#rows");
 const msg = document.querySelector("#msg");
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({
-  "&": "&amp;", "<": "&lt;", ">": "&gt;",
-  '"': "&quot;", "'": "&#39;"
+"&":"&amp;","<":"&lt;",">":"&gt;",
+'"':"&quot;","'":"&#39;"
 }[c]));
 
 window.applicationReferences = {};
 
 document.querySelector("#load").onclick = async () => {
+  if (!token.value.trim()) {
+    msg.textContent = "Please enter your administrator access token.";
+    return;
+  }
+
   msg.textContent = "Loading applications...";
 
   try {
     const r = await fetch("/api/admin/list", {
-      headers: { Authorization: "Bearer " + token.value }
+      headers: { Authorization: "Bearer " + token.value.trim() },
+      cache: "no-store"
     });
 
     const d = await r.json();
+
     if (!r.ok) throw Error(d.error || "Unable to load applications.");
 
     window.applicationReferences = {};
@@ -83,6 +142,7 @@ document.querySelector("#load").onclick = async () => {
 
 window.updateStatus = async id => {
   const reference = window.applicationReferences[id];
+
   if (!reference) {
     msg.textContent = "Application reference not found. Reload applications.";
     return;
@@ -95,13 +155,14 @@ window.updateStatus = async id => {
     const r = await fetch("/api/admin/update", {
       method: "POST",
       headers: {
-        Authorization: "Bearer " + token.value,
+        Authorization: "Bearer " + token.value.trim(),
         "Content-Type": "application/json"
       },
       body: JSON.stringify({ reference, status, note })
     });
 
     const d = await r.json();
+
     if (!r.ok) throw Error(d.error || "Update failed.");
 
     msg.textContent = "Application status updated. Email sent: " +
@@ -113,4 +174,6 @@ window.updateStatus = async id => {
     msg.textContent = e.message;
   }
 };
-</script> 
+</script>
+</body>
+</html>
