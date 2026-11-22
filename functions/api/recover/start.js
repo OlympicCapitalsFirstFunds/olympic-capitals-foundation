@@ -75,20 +75,40 @@ export async function onRequestPost({ request, env }) {
       return json(response);
     }
 
-    const recent = await env.DB.prepare(`
-      SELECT COUNT(*) AS total
-      FROM tracking_recovery
+    const now = Math.floor(Date.now() / 1000);
+    const windowStart = now - 900;
+
+    await env.DB.prepare(`
+      INSERT INTO tracking_recovery_limits (
+        reference_number,
+        window_started_at,
+        request_count
+      )
+      VALUES (?, ?, 1)
+      ON CONFLICT(reference_number) DO UPDATE SET
+        request_count = CASE
+          WHEN window_started_at <= ? THEN 1
+          ELSE request_count + 1
+        END,
+        window_started_at = CASE
+          WHEN window_started_at <= ? THEN excluded.window_started_at
+          ELSE window_started_at
+        END
+    `).bind(reference, now, windowStart, windowStart).run();
+
+    const limit = await env.DB.prepare(`
+      SELECT request_count
+      FROM tracking_recovery_limits
       WHERE reference_number = ?
-      AND created_at >= datetime('now', '-15 minutes')
     `).bind(reference).first();
 
-    if (Number(recent?.total || 0) >= 3) {
+    if (Number(limit?.request_count || 0) > 3) {
       return json(response);
     }
 
     const code = verificationCode();
     const codeHash = await hash(reference + ":" + code);
-    const expiresAt = Math.floor(Date.now() / 1000) + 600;
+    const expiresAt = now + 600;
 
     await env.DB.prepare(`
       DELETE FROM tracking_recovery
@@ -115,7 +135,7 @@ export async function onRequestPost({ request, env }) {
     const mail = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        Authorization: \`Bearer \${env.RESEND_API_KEY}\`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
