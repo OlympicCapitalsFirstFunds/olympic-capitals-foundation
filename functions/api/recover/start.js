@@ -34,8 +34,29 @@ function verificationCode() {
   return String(100000 + (values[0] % 900000));
 }
 
+async function sendEmail(env, to, subject, html) {
+  const response = await fetch(
+    "https://sendliberty.com/api/send",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.SENDLIBERTY_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: "Olympic Capitals First Funds Foundation <olympiccapitalsfirstfunds@gmail.com>",
+        to,
+        subject,
+        html
+      })
+    }
+  );
+
+  return response.ok;
+}
+
 export async function onRequestPost({ request, env }) {
-  if (!env.DB || !env.RESEND_API_KEY || !env.MAIL_FROM) {
+  if (!env.DB || !env.SENDLIBERTY_API_KEY) {
     return json({
       error: "Recovery service is temporarily unavailable."
     }, 503);
@@ -132,21 +153,20 @@ export async function onRequestPost({ request, env }) {
       <p>If you did not request this, please ignore this email.</p>
     `;
 
-    const mail = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: \`Bearer \${env.RESEND_API_KEY}\`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        from: env.MAIL_FROM,
-        to: application.email,
-        subject: "Tracking Code Recovery Verification",
-        html
-      })
-    });
+    let mailSent = false;
 
-    if (!mail.ok) {
+    try {
+      mailSent = await sendEmail(
+        env,
+        application.email,
+        "Tracking Code Recovery Verification",
+        html
+      );
+    } catch {
+      mailSent = false;
+    }
+
+    if (!mailSent) {
       await env.DB.prepare(`
         DELETE FROM tracking_recovery
         WHERE reference_number = ?
