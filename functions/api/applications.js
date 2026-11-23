@@ -13,6 +13,7 @@ async function hash(value) {
     "SHA-256",
     new TextEncoder().encode(value)
   );
+
   return [...new Uint8Array(result)]
     .map(b => b.toString(16).padStart(2, "0"))
     .join("");
@@ -20,25 +21,43 @@ async function hash(value) {
 
 function token(bytes = 8) {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
-  return [...data].map(b => b.toString(16).padStart(2, "0")).join("");
+  return [...data]
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char]);
 }
 
 async function sendEmail(env, to, subject, html) {
-  if (!env.RESEND_API_KEY || !env.MAIL_FROM) return;
+  if (!env.SENDLIBERTY_API_KEY) {
+    return false;
+  }
 
-  await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.RESEND_API_KEY}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      from: env.MAIL_FROM,
-      to,
-      subject,
-      html
-    })
-  });
+  const response = await fetch(
+    "https://sendliberty.com/api/send",
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${env.SENDLIBERTY_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        to,
+        subject,
+        html
+      })
+    }
+  );
+
+  return response.ok;
 }
 
 export async function onRequestPost({ request, env }) {
@@ -51,7 +70,9 @@ export async function onRequestPost({ request, env }) {
   }
 
   if (!env.DB) {
-    return json({ error: "Application database is unavailable." }, 503);
+    return json({
+      error: "Application database is unavailable."
+    }, 503);
   }
 
   const name = String(d.fullName || "").trim();
@@ -79,11 +100,14 @@ export async function onRequestPost({ request, env }) {
     amount < 10000 || amount > 1000000 ||
     !d.consent
   ) {
-    return json({ error: "Please complete all required fields correctly." }, 400);
+    return json({
+      error: "Please complete all required fields correctly."
+    }, 400);
   }
 
   const reference =
-    "OCFF-" + new Date().getFullYear() + "-" + token(3).toUpperCase();
+    "OCFF-" + new Date().getFullYear() + "-" +
+    token(3).toUpperCase();
 
   const trackingCode = token();
   const trackingHash = await hash(trackingCode);
@@ -121,39 +145,57 @@ export async function onRequestPost({ request, env }) {
     ).run();
 
     const inbox =
-      env.APPLICATION_EMAIL || "olympiccapitalafirstfunds@gmail.com";
+      env.APPLICATION_EMAIL ||
+      "olympiccapitalafirstfunds@gmail.com";
 
-    await Promise.all([
-      sendEmail(
+    const safeName = escapeHtml(name);
+    const safeEmail = escapeHtml(email);
+    const safeCountry = escapeHtml(country);
+
+    let adminEmailSent = false;
+    let applicantEmailSent = false;
+
+    try {
+      adminEmailSent = await sendEmail(
         env,
         inbox,
         "New grant application: " + reference,
         `<p>New application received.</p>
-         <p>Name: ${name}</p>
-         <p>Email: ${email}</p>
-         <p>Country: ${country}</p>
+         <p>Name: ${safeName}</p>
+         <p>Email: ${safeEmail}</p>
+         <p>Country: ${safeCountry}</p>
          <p>Requested amount: USD ${amount.toLocaleString("en-US")}</p>
          <p>Reference: ${reference}</p>`
-      ),
-      sendEmail(
+      );
+
+      // Personal Gmail accounts have a one-email-per-second sending limit.
+      await new Promise(resolve => setTimeout(resolve, 1100));
+
+      applicantEmailSent = await sendEmail(
         env,
         email,
         "Application received",
-        `<p>Dear ${name},</p>
+        `<p>Dear ${safeName},</p>
          <p>Your application has been received.</p>
          <p>Reference: ${reference}</p>
          <p>Private tracking code: ${trackingCode}</p>
          <p>Please keep these details safe.</p>`
-      )
-    ]);
+      );
+    } catch {
+      // The application remains saved even if an email fails.
+    }
 
     return json({
       ok: true,
       reference,
-      trackingCode
+      trackingCode,
+      adminEmailSent,
+      applicantEmailSent
     });
 
   } catch {
-    return json({ error: "Unable to save your application. Please try again." }, 500);
+    return json({
+      error: "Unable to save your application. Please try again."
+    }, 500);
   }
 }
