@@ -37,8 +37,26 @@ function escapeHtml(value) {
   })[char]);
 }
 
+async function sendEmail(env, to, subject, html) {
+  const response = await fetch("https://sendliberty.com/api/send", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.SENDLIBERTY_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: "Olympic Capitals First Funds Foundation <olympiccapitalsfirstfunds@gmail.com>",
+      to,
+      subject,
+      html
+    })
+  });
+
+  return response.ok;
+}
+
 export async function onRequestPost({ request, env }) {
-  if (!env.DB || !env.RESEND_API_KEY || !env.MAIL_FROM) {
+  if (!env.DB || !env.SENDLIBERTY_API_KEY) {
     return json({
       error: "Recovery service is temporarily unavailable."
     }, 503);
@@ -126,7 +144,7 @@ export async function onRequestPost({ request, env }) {
     const newTrackingHash = await hash(newTrackingCode);
     const oldTrackingHash = application.tracking_code_hash;
 
-    // SAVE THE NEW TRACKING CODE BEFORE SENDING THE EMAIL
+    // Save the new tracking code before sending the email.
     const updated = await env.DB.prepare(`
       UPDATE applications
       SET tracking_code_hash = ?,
@@ -147,36 +165,29 @@ export async function onRequestPost({ request, env }) {
       }, 500);
     }
 
-    // SEND THE NEW TRACKING CODE
-    let mail;
+    // Send the new tracking code through Sendliberty.
+    let mailSent = false;
 
     try {
-      mail = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.RESEND_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          from: env.MAIL_FROM,
-          to: application.email,
-          subject: "Your New Foundation Tracking Code",
-          html: `
-            <p>Dear ${escapeHtml(application.full_name)},</p>
-            <p>Your tracking code recovery was successful.</p>
-            <p>Your new private tracking code is:</p>
-            <h2>${newTrackingCode}</h2>
-            <p>Application reference: ${escapeHtml(reference)}</p>
-            <p>Please keep this code safe.</p>
-          `
-        })
-      });
+      mailSent = await sendEmail(
+        env,
+        application.email,
+        "Your New Foundation Tracking Code",
+        `
+          <p>Dear ${escapeHtml(application.full_name)},</p>
+          <p>Your tracking code recovery was successful.</p>
+          <p>Your new private tracking code is:</p>
+          <h2>${escapeHtml(newTrackingCode)}</h2>
+          <p>Application reference: ${escapeHtml(reference)}</p>
+          <p>Please keep this code safe.</p>
+        `
+      );
     } catch {
-      mail = null;
+      mailSent = false;
     }
 
-    // RESTORE THE PREVIOUS CODE IF EMAIL DELIVERY IS REJECTED
-    if (!mail || !mail.ok) {
+    // Restore the previous code if the email request fails.
+    if (!mailSent) {
       const restored = await env.DB.prepare(`
         UPDATE applications
         SET tracking_code_hash = ?,
@@ -200,7 +211,7 @@ export async function onRequestPost({ request, env }) {
       }, 503);
     }
 
-    // REMOVE THE USED RECOVERY REQUEST
+    // Remove the used recovery request.
     await env.DB.prepare(`
       DELETE FROM tracking_recovery
       WHERE id = ?
