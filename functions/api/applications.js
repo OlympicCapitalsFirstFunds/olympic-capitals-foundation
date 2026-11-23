@@ -46,10 +46,11 @@ async function sendEmail(env, to, subject, html) {
     {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${env.SENDLIBERTY_API_KEY}`,
+        Authorization: `Bearer ${env.SENDLIBERTY_API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
+        from: "Olympic Capitals First Funds Foundation <olympiccapitalsfirstfunds@gmail.com>",
         to,
         subject,
         html
@@ -146,7 +147,7 @@ export async function onRequestPost({ request, env }) {
 
     const inbox =
       env.APPLICATION_EMAIL ||
-      "olympiccapitalafirstfunds@gmail.com";
+      "olympiccapitalsfirstfunds@gmail.com";
 
     const safeName = escapeHtml(name);
     const safeEmail = escapeHtml(email);
@@ -165,10 +166,10 @@ export async function onRequestPost({ request, env }) {
          <p>Email: ${safeEmail}</p>
          <p>Country: ${safeCountry}</p>
          <p>Requested amount: USD ${amount.toLocaleString("en-US")}</p>
-         <p>Reference: ${reference}</p>`
+         <p>Reference: ${escapeHtml(reference)}</p>`
       );
 
-      // Personal Gmail accounts have a one-email-per-second sending limit.
+      // Allow time between messages for personal Gmail sending limits.
       await new Promise(resolve => setTimeout(resolve, 1100));
 
       applicantEmailSent = await sendEmail(
@@ -177,8 +178,8 @@ export async function onRequestPost({ request, env }) {
         "Application received",
         `<p>Dear ${safeName},</p>
          <p>Your application has been received.</p>
-         <p>Reference: ${reference}</p>
-         <p>Private tracking code: ${trackingCode}</p>
+         <p>Reference: ${escapeHtml(reference)}</p>
+         <p>Private tracking code: ${escapeHtml(trackingCode)}</p>
          <p>Please keep these details safe.</p>`
       );
     } catch {
